@@ -346,19 +346,19 @@ export const BUILTIN_SITES = {
   },
   "pttime-org": {
     "enabled": true,
-    "driver": "nexusphp",
+    "driver": "pttime",
     "schedule": "auto",
     "note": "PTTime",
     "notify": true,
     "retry": 2,
     "retry_delay_ms": 10000,
     "timeout": 30000,
-    "base_url": "https://www.pttime.org/",
+    "base_url": "https://www.pttime.org",
     "category": "pt",
-    "kind": "visit",
+    "kind": "signin",
     "login_keyword": "PTTime",
     "proxy": "auto",
-    "signin_mode": "playwright"
+    "signin_mode": "api"
   },
   "pterclub-net": {
     "enabled": true,
