@@ -440,6 +440,26 @@ export const BUILTIN_SITES = {
     "proxy": "auto",
     "category": "pt",
     "kind": "visit"
+  },
+  "ubits-club": {
+    "enabled": true,
+    "driver": "ubits",
+    "schedule": "auto",
+    "note": "UBits",
+    "notify": true,
+    "retry": 2,
+    "retry_delay_ms": 10000,
+    "timeout": 60000,
+    "base_url": "https://ubits.club",
+    "category": "pt",
+    "kind": "signin",
+    "login_keyword": "UBits",
+    "verification_type": "Cloudflare",
+    "verification_auto": true,
+    "signin_mode": "playwright",
+    "playwright_wait_ms": 2000,
+    "cloudflare_wait_ms": 30000,
+    "proxy": "auto"
   }
 };
 

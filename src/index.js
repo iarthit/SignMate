@@ -53,6 +53,7 @@ import TiebaDriver from "./drivers/tieba.js";
 import MTeamDriver from "./drivers/mteam.js";
 import PTTimeDriver from "./drivers/pttime.js";
 import WintersakuraDriver from "./drivers/wintersakura.js";
+import UBitsDriver from "./drivers/ubits.js";
 
 registerDriver("nodeseek", NodeSeekDriver);
 registerDriver("template", TemplateDriver);
@@ -73,6 +74,7 @@ registerDriver("tieba", TiebaDriver);
 registerDriver("mteam", MTeamDriver);
 registerDriver("pttime", PTTimeDriver);
 registerDriver("wintersakura", WintersakuraDriver);
+registerDriver("ubits", UBitsDriver);
 
 function loadNotifyConfig() {
   const path = join(import.meta.dirname, "..", "config", "notify.yaml");
