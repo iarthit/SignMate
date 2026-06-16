@@ -788,7 +788,7 @@ function buildCookieCloudMatches(cookieData = {}, { includeDisabled = false } = 
     const key = site.key || site.driver;
     const baseUrl = site.base_url || "";
     let hostname = "";
-    try { hostname = new URL(baseUrl).hostname; } catch {}
+    try { hostname = new URL(baseUrl).hostname; } catch { }
     const matched = domainBuckets.filter(bucket => cookieDomainMatch(hostname, bucket.domain));
     const cookies = matched.flatMap(bucket => bucket.cookies);
     const cookie = cookieToHeader(cookies);
@@ -1744,14 +1744,16 @@ export async function startServer() {
         "config/webdav-settings.json": JSON.stringify(readWebDavConfigFull(), null, 2),
         "config/settings.env": readEnvRaw(),
       };
-      res.json({ ok: true, data: {
-        exportedAt: new Date().toISOString(),
-        version: 2,
-        scope: "full-user-data",
-        note: "包含完整用户配置与敏感凭据；不包含运行日志和签到历史。请像密码文件一样保存。",
-        excluded: ["logs/**", "data/history.json", "data/batch-state.json", "data/debug/**"],
-        files: exportFiles,
-      }});
+      res.json({
+        ok: true, data: {
+          exportedAt: new Date().toISOString(),
+          version: 2,
+          scope: "full-user-data",
+          note: "包含完整用户配置与敏感凭据；不包含运行日志和签到历史。请像密码文件一样保存。",
+          excluded: ["logs/**", "data/history.json", "data/batch-state.json", "data/debug/**"],
+          files: exportFiles,
+        }
+      });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -1793,13 +1795,15 @@ export async function startServer() {
     try {
       const sitesRaw = readSitesRaw();
       const batch = sitesRaw.batch || {};
-      res.json({ ok: true, data: {
-        signinTime: batch.signin_time || "auto",
-        visitTime: batch.visit_time || "auto",
-        mode: batch.mode || "random",
-        randomStart: batch.random_start || "02:00",
-        randomEnd: batch.random_end || "22:00",
-      }});
+      res.json({
+        ok: true, data: {
+          signinTime: batch.signin_time || "auto",
+          visitTime: batch.visit_time || "auto",
+          mode: batch.mode || "random",
+          randomStart: batch.random_start || "02:00",
+          randomEnd: batch.random_end || "22:00",
+        }
+      });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -1833,11 +1837,13 @@ export async function startServer() {
       const bark = notifyConfig.bark || {};
       const botToken = process.env.TELEGRAM_BOT_TOKEN || tg.bot_token || "";
       const chatId = process.env.TELEGRAM_CHAT_ID || tg.chat_id || "";
-      res.json({ ok: true, data: {
-        signin: { onlyFailures: notifyConfig.signin?.only_failures === true, consolidated: notifyConfig.signin?.consolidated !== false },
-        telegram: { enabled: tg.enabled !== false && Boolean(botToken && chatId), hasBotToken: Boolean(botToken), chatId, signin: tg.signin !== false, cookie: tg.cookie !== false, proxy: tg.proxy !== false },
-        bark: { enabled: bark.enabled === true, server: bark.server || (bark.url ? String(bark.url).replace(/\/+[^/]+$/, "") : "https://api.day.app"), key: bark.key || (bark.url ? String(bark.url).split("/").filter(Boolean).pop() : ""), url: bark.url || "", signin: bark.signin !== false, cookie: bark.cookie !== false, proxy: bark.proxy !== false },
-      }});
+      res.json({
+        ok: true, data: {
+          signin: { onlyFailures: notifyConfig.signin?.only_failures === true, consolidated: notifyConfig.signin?.consolidated !== false },
+          telegram: { enabled: tg.enabled !== false && Boolean(botToken && chatId), hasBotToken: Boolean(botToken), chatId, signin: tg.signin !== false, cookie: tg.cookie !== false, proxy: tg.proxy !== false },
+          bark: { enabled: bark.enabled === true, server: bark.server || (bark.url ? String(bark.url).replace(/\/+[^/]+$/, "") : "https://api.day.app"), key: bark.key || (bark.url ? String(bark.url).split("/").filter(Boolean).pop() : ""), url: bark.url || "", signin: bark.signin !== false, cookie: bark.cookie !== false, proxy: bark.proxy !== false },
+        }
+      });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -2176,7 +2182,7 @@ export async function startServer() {
           const siteKind = site.kind || (site.driver === "website" || site.driver === "visit" ? "visit" : "signin");
           if (site.enabled !== false && siteKind === "signin") enabledSigninKeys.add(String(site.key || site.driver || site.note || ""));
         }
-      } catch {}
+      } catch { }
       const todayKey = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" });
       const signedToday = new Set();
       for (const entry of history) {
@@ -2200,7 +2206,7 @@ export async function startServer() {
         const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, "utf-8")) : {};
         summary.random.dueTime = state?.all?.dueTime || null;
         summary.random.completedAt = state?.all?.completedAt || null;
-      } catch {}
+      } catch { }
       res.json({ ok: true, data: summary });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
@@ -2275,7 +2281,7 @@ export async function startServer() {
         const sliderDiagnostic = req.body?.sliderDiagnostic === true || req.body?.captchaSliderDiagnostic === true;
         const sliderFullDiagnostic = req.body?.sliderFullDiagnostic === true || req.body?.captchaSliderFullDiagnostic === true;
         const explicitFlags = {
-          
+
         };
         const runSite = dryRun
           ? { ...site, ...explicitFlags, captcha_ai_dry_run: true, captcha_ai_local_only: req.body?.localOnly !== false, captcha_ai_compare_models: false, captcha_ai_save_samples: saveSamples, tcaptcha_stealth_diagnostic: !!req.body?.stealthDiagnostic }
