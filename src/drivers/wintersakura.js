@@ -182,12 +182,46 @@ export default class WinterSakuraDriver extends BaseDriver {
       };
     }
 
-    // 解析 PT 账号统计数据
-    const stats = parsePtStats(text);
+    // 解析 PT 账号统计数据（从签到页面，可能不完整）
+    let stats = parsePtStats(text);
     const alreadySigned = isAlreadySigned(text);
     const signSuccess = isSignSuccess(text);
     const bonusGain = extractBonusGain(text);
     const signText = extractSignText(text);
+
+    // 如果签到页面缺少统计数据（魔力值、分享率等），额外请求首页获取完整信息
+    const needFullStats = !stats.bonus || !stats.ratio || !stats.upload || !stats.download;
+    if ((alreadySigned || signSuccess) && needFullStats) {
+      try {
+        const homeUrl = base_url.replace(/\/$/, "") + "/";
+        const homeRes = await get(homeUrl, {
+          headers: {
+            "Cookie": cookie,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Referer": url,
+          },
+          timeout,
+          proxyUrl: proxy_url,
+        });
+        const homeText = await homeRes.text().catch(() => "");
+        const homeStats = parsePtStats(homeText);
+        // 只合并签到页面缺失的字段
+        stats = {
+          ...stats,
+          username: stats.username || homeStats.username,
+          bonus: stats.bonus || homeStats.bonus,
+          ratio: stats.ratio || homeStats.ratio,
+          upload: stats.upload || homeStats.upload,
+          download: stats.download || homeStats.download,
+          invite: stats.invite || homeStats.invite,
+        };
+        logger.info(`[WinterSakura] 从首页补充统计数据: bonus=${stats.bonus}, ratio=${stats.ratio}, upload=${stats.upload}, download=${stats.download}`);
+      } catch (err) {
+        logger.warn(`[WinterSakura] 请求首页补充统计数据失败: ${err.message}`);
+      }
+    }
 
     if (alreadySigned) {
       const messageParts = ["今日已签到"];

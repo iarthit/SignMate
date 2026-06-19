@@ -12,6 +12,45 @@ import logger from "../utils/logger.js";
 import { resolveChromiumExecutablePath, launchBrowser } from "../utils/browser.js";
 import { getCookieForSite, createHttpSession, htmlToText, readText } from "../utils/http-session.js";
 
+/**
+ * 注入反检测脚本到浏览器上下文，隐藏自动化痕迹
+ */
+const STEALTH_INIT_SCRIPT = `
+// 隐藏 webdriver 属性
+Object.defineProperty(navigator, 'webdriver', { get: () => false });
+
+// 模拟 chrome 对象
+window.chrome = {
+  runtime: { onMessage: { addListener: () => {} }, onConnect: { addListener: () => {} } }
+};
+
+// 覆盖 permissions.query 避免暴露自动化
+const originalQuery = window.navigator.permissions.query.bind(window.navigator.permissions);
+window.navigator.permissions.query = (parameters) => {
+  if (parameters && parameters.name) {
+    const blocked = ['notifications', 'clipboard-read', 'clipboard-write', 'geolocation'];
+    if (blocked.includes(parameters.name)) {
+      return Promise.resolve({ state: 'denied', onchange: null });
+    }
+  }
+  return originalQuery(parameters);
+};
+
+// 覆盖 plugins 数组
+Object.defineProperty(navigator, 'plugins', {
+  get: () => [1, 2, 3, 4, 5].map(() => ({ name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' })),
+});
+
+// 覆盖 languages
+Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });
+
+// 覆盖 connection
+Object.defineProperty(navigator, 'connection', {
+  get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10, saveData: false }),
+});
+`;
+
+
 function formatSignTime(date = new Date()) {
     return date.toLocaleString("zh-CN", {
         timeZone: "Asia/Shanghai",
@@ -190,12 +229,40 @@ async function tryClickTurnstileCheckbox(page) {
 /**
  * 等待 Cloudflare JS Challenge / Turnstile 自动完成
  * 如果检测到 Turnstile 复选框，会自动尝试点击
+ * 
+ * 改进策略：
+ * 1. 先等待页面完全加载（networkidle）
+ * 2. 检测 Turnstile 状态，token 已生成则直接返回通过
+ * 3. 检测到 Turnstile 复选框则尝试点击
+ * 4. 监听页面导航事件（Turnstile 通过后页面通常会跳转）
+ * 5. 轮询间隔更智能，前 10 秒密集检测，之后放宽
  */
 async function waitForCloudflarePass(page, timeoutMs = 30_000) {
     const deadline = Date.now() + timeoutMs;
     let clickAttempted = false;
+    let lastTokenLength = 0;
+    let stableTokenCycles = 0;
+
+    // 先等待页面加载稳定
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => { });
+    await page.waitForTimeout(1000);
+
+    // 设置页面导航监听 — Turnstile 通过后可能触发页面跳转
+    let navigated = false;
+    const navPromise = page.waitForNavigation({ timeout: timeoutMs }).then(() => { navigated = true; }).catch(() => { });
 
     while (Date.now() < deadline) {
+        // 如果页面发生了导航，重新检查
+        if (navigated) {
+            logger.info("[UBits] 检测到页面导航，Turnstile 可能已通过");
+            await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => { });
+            await page.waitForTimeout(1500);
+            const bodyText = await page.locator("body").innerText({ timeout: 3000 }).catch(() => "");
+            if (!isCloudflareChallenge(bodyText) && bodyText.length > 200) {
+                return { passed: true };
+            }
+        }
+
         const bodyText = await page.locator("body").innerText({ timeout: 3000 }).catch(() => "");
 
         // Cloudflare 挑战完成后页面会跳转或显示站点内容
@@ -208,25 +275,75 @@ async function waitForCloudflarePass(page, timeoutMs = 30_000) {
             const iframe = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
             const container = document.querySelector(".cf-turnstile");
             const token = document.querySelector('input[name="cf-turnstile-response"]')?.value || "";
+            // 检查是否有隐藏的 Turnstile 验证通过的标志
+            const turnstileWidget = document.querySelector(".cf-turnstile") || document.querySelector(".cf-turnstile-widget");
+            const widgetState = turnstileWidget?.getAttribute("data-state") || "";
             return {
                 hasIframe: !!iframe,
                 hasContainer: !!container,
                 tokenLength: token.length,
+                widgetState,
                 iframeBox: iframe ? iframe.getBoundingClientRect().toJSON() : null,
+                // 检查 iframe 是否可见（Turnstile 有时会隐藏 iframe）
+                iframeVisible: iframe ? (iframe.offsetWidth > 0 && iframe.offsetHeight > 0) : false,
             };
-        }).catch(() => ({ hasIframe: false, hasContainer: false, tokenLength: 0, iframeBox: null }));
+        }).catch(() => ({ hasIframe: false, hasContainer: false, tokenLength: 0, widgetState: "", iframeBox: null, iframeVisible: false }));
 
         // token 已生成，说明验证已通过
         if (turnstileState.tokenLength > 0) {
-            logger.info("[UBits] Turnstile token 已生成，验证通过");
-            await page.waitForTimeout(1500);
-            return { passed: true };
+            // 连续多次检测到 token 才确认，避免瞬态值
+            if (turnstileState.tokenLength === lastTokenLength) {
+                stableTokenCycles++;
+            } else {
+                stableTokenCycles = 0;
+                lastTokenLength = turnstileState.tokenLength;
+            }
+            if (stableTokenCycles >= 2) {
+                logger.info(`[UBits] Turnstile token 已生成 (长度=${turnstileState.tokenLength})，验证通过`);
+                await page.waitForTimeout(1500);
+                return { passed: true };
+            }
         }
 
-        // 检测到 Turnstile，尝试点击复选框
+        // 检测到 Turnstile 但 iframe 不可见（可能是隐形 Turnstile），等待其自动处理
+        if (turnstileState.hasContainer && !turnstileState.hasIframe && !clickAttempted) {
+            logger.info("[UBits] 检测到隐形 Turnstile，等待自动验证...");
+            await page.waitForTimeout(3000);
+            continue;
+        }
+
+        // 检测到 Turnstile 复选框（iframe 可见），尝试点击
         if ((turnstileState.hasIframe || turnstileState.hasContainer) && !clickAttempted) {
             logger.info("[UBits] 检测到 Cloudflare Turnstile 复选框，尝试自动点击...");
-            await page.waitForTimeout(1500); // 等待 Turnstile 完全加载
+            await page.waitForTimeout(2000); // 等待 Turnstile 完全加载
+
+            // 先尝试通过 dispatchEvent 模拟真实点击（比 mouse.click 更隐蔽）
+            try {
+                const clicked = await page.evaluate(() => {
+                    const iframe = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+                    if (iframe) {
+                        // 尝试触发 iframe 内的点击事件
+                        const rect = iframe.getBoundingClientRect();
+                        const clickEvent = new MouseEvent('click', {
+                            bubbles: true,
+                            cancelable: true,
+                            view: window,
+                            clientX: rect.left + Math.min(rect.width * 0.15, 35),
+                            clientY: rect.top + rect.height / 2,
+                        });
+                        iframe.dispatchEvent(clickEvent);
+                        return true;
+                    }
+                    return false;
+                }).catch(() => false);
+                if (clicked) {
+                    logger.info("[UBits] 已通过 dispatchEvent 触发 Turnstile 点击");
+                    clickAttempted = true;
+                    await page.waitForTimeout(3000);
+                    continue;
+                }
+            } catch { /* dispatchEvent 方式失败 */ }
+
             const clicked = await tryClickTurnstileCheckbox(page);
             if (clicked) {
                 clickAttempted = true;
@@ -238,17 +355,49 @@ async function waitForCloudflarePass(page, timeoutMs = 30_000) {
 
         // 如果第一次点击后仍未通过，等待更长时间后再试
         if (clickAttempted && (turnstileState.hasIframe || turnstileState.hasContainer)) {
-            // 可能需要等待 Turnstile 内部处理，每 5 秒重试一次点击
-            const elapsed = timeoutMs - (deadline - Date.now());
-            if (elapsed > 8000 && elapsed % 5000 < 2000) {
+            const elapsed = Date.now() - (deadline - timeoutMs);
+            // 每 4 秒重试一次点击，但使用不同的点击位置
+            if (elapsed > 8000 && (elapsed % 4000 < 1500)) {
                 logger.info("[UBits] 重新尝试点击 Turnstile 复选框...");
-                await tryClickTurnstileCheckbox(page);
+                // 尝试不同的点击位置（稍微偏移）
+                try {
+                    const iframes = page.locator('iframe[src*="challenges.cloudflare.com"]');
+                    const count = await iframes.count().catch(() => 0);
+                    for (let i = 0; i < count; i++) {
+                        const box = await iframes.nth(i).boundingBox().catch(() => null);
+                        if (box && box.width > 0 && box.height > 0) {
+                            // 交替点击不同位置
+                            const offsetX = (elapsed % 2 === 0) ? box.width * 0.15 : box.width * 0.5;
+                            const offsetY = (elapsed % 3 === 0) ? box.height * 0.3 : box.height * 0.7;
+                            await page.mouse.click(box.x + offsetX, box.y + offsetY);
+                            logger.info(`[UBits] 重试点击 Turnstile iframe 坐标 (${Math.round(box.x + offsetX)}, ${Math.round(box.y + offsetY)})`);
+                        }
+                    }
+                } catch { /* 重试失败 */ }
                 await page.waitForTimeout(3000);
             }
         }
 
-        await page.waitForTimeout(2000);
+        // 动态调整轮询间隔：前 10 秒密集检测，之后放宽
+        const elapsed = Date.now() - (deadline - timeoutMs);
+        if (elapsed < 10000) {
+            await page.waitForTimeout(1000);
+        } else {
+            await page.waitForTimeout(2000);
+        }
     }
+
+    // 超时后，再尝试最后一次点击
+    if (!clickAttempted) {
+        logger.info("[UBits] 超时前最后一次尝试点击 Turnstile...");
+        await tryClickTurnstileCheckbox(page);
+        await page.waitForTimeout(3000);
+        const bodyText = await page.locator("body").innerText({ timeout: 3000 }).catch(() => "");
+        if (!isCloudflareChallenge(bodyText) && bodyText.length > 200) {
+            return { passed: true };
+        }
+    }
+
     return { passed: false };
 }
 
@@ -363,7 +512,41 @@ export default class UBitsDriver extends BaseDriver {
         const browser = await launchBrowser({
             chromium,
             siteConfig: this.siteConfig,
-            launchOptions: { executablePath: chromium_executable_path, headless: true, proxy, args: ["--no-sandbox"], timeout },
+            launchOptions: {
+                executablePath: chromium_executable_path,
+                headless: true,
+                proxy,
+                args: [
+                    "--no-sandbox",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-features=IsolateOrigins,site-per-process",
+                    "--disable-web-security",
+                    "--disable-features=BlockInsecurePrivateNetworkRequests",
+                    "--disable-features=OutOfBlinkCors",
+                    "--disable-features=ChromeWhatsNewUI",
+                    "--disable-features=TranslateUI",
+                    "--disable-sync",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-background-networking",
+                    "--disable-background-timer-throttling",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-breakpad",
+                    "--disable-component-extensions-with-background-pages",
+                    "--disable-dev-shm-usage",
+                    "--disable-extensions",
+                    "--disable-features=Translate",
+                    "--disable-hang-monitor",
+                    "--disable-ipc-flooding-protection",
+                    "--disable-prompt-on-repost",
+                    "--disable-renderer-backgrounding",
+                    "--enable-features=NetworkService,NetworkServiceInProcess",
+                    "--force-color-profile=srgb",
+                    "--metrics-recording-only",
+                    "--mute-audio",
+                ],
+                timeout,
+            },
         });
 
         try {
@@ -372,8 +555,19 @@ export default class UBitsDriver extends BaseDriver {
                 locale: "zh-CN",
                 timezoneId: "Asia/Shanghai",
                 viewport: { width: 1440, height: 1000 },
+                // 禁用 WebDriver 相关功能
+                permissions: [],
+                // 设置额外的 HTTP 头
+                extraHTTPHeaders: {
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                    "Sec-Ch-Ua": '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
+                    "Sec-Ch-Ua-Mobile": "?0",
+                    "Sec-Ch-Ua-Platform": '"Windows"',
+                },
             });
-            steps.push({ label: "启动 Playwright 浏览器", ok: true });
+            // 注入反检测脚本
+            await context.addInitScript(STEALTH_INIT_SCRIPT);
+            steps.push({ label: "启动 Playwright 浏览器", ok: true, detail: "已注入反检测脚本" });
 
             // 注入 Cookie
             logger.info("[UBits] 步骤 2/5：注入 Cookie");
