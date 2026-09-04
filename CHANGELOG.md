@@ -4,6 +4,17 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本的 patch 递增节奏。
 
+## [0.1.26] - 2026-09-04
+
+### 修复
+
+- PCBeta 识别“请启用 JavaScript 后重试”等 JavaScript/安全验证页，不再误报为 Cookie 无效。
+- PCBeta 遇到该验证页时停止后续任务并明确要求在相同代理出口人工验证，不执行签到、回帖或领奖。
+
+### 部署
+
+- 新增 Linux `docker-compose.host-network.yml` 覆盖文件，供必须访问同机宿主机代理的可信自托管环境使用；默认 bridge 网络部署保持不变。
+
 ## [0.1.25] - 2026-08-17
 
 ### 修复
@@ -261,3 +272,4 @@
 [0.1.6]: https://github.com/HughRyu/SignMate/releases/tag/v0.1.6
 [0.1.5]: https://github.com/HughRyu/SignMate/releases/tag/v0.1.5
 [0.1.24]: https://github.com/HughRyu/SignMate/compare/v0.1.23...v0.1.24
+[0.1.26]: https://github.com/HughRyu/SignMate/compare/v0.1.25...v0.1.26

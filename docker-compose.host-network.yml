@@ -1,0 +1,8 @@
+# Linux production override for services that must reach a host-local proxy.
+# Use with: docker compose -f docker-compose.yml -f docker-compose.host-network.yml up -d --build
+services:
+  signmate:
+    network_mode: host
+    ports: !reset []
+    environment:
+      WEB_PORT: 9999

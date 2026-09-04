@@ -48,6 +48,11 @@ function loggedIn(text = "", title = "") {
   return /退出|我的|设置|消息|提醒|积分|个人中心|个人资料|快捷导航|HughRyu/.test(head);
 }
 
+export function isPCBetaSecurityChallenge(text = "", title = "") {
+  const page = `${title} ${compactText(text).slice(0, 3000)}`;
+  return /异常请求验证|请求异常.*安全验证|请完成安全验证后继续访问|拖动滑块验证|请启用\s*JavaScript\s*后重试/.test(page);
+}
+
 function alreadyDone(text = "") {
   const normalized = compactText(text);
   return /已经领取|已领取奖励|任务已完成|今天已完成|今日已完成|今天已领取|今日已领取|明天再来|下次再来/.test(normalized);
@@ -268,6 +273,20 @@ export default class PCBetaDriver extends BaseDriver {
     logger.info(`[PCBeta/API] 步骤 1/6：打开任务页 → ${taskUrl}`);
     const taskPage = await openText(session, taskUrl, steps, "HTTP 打开 PCBeta 任务页面");
     let taskStats = parseCreditStats(taskPage.text);
+    if (isPCBetaSecurityChallenge(taskPage.text, taskPage.title)) {
+      return {
+        success: false,
+        message: "PCBeta 触发 JavaScript/安全验证：Cookie 可能仍有效；请在相同代理出口下人工完成验证后再试",
+        details: taskDetails({
+          signTime,
+          pageTitle: taskPage.title,
+          stats: taskStats,
+          taskUrl: dailyTaskUrl,
+          extra: { verificationBlocked: true, verificationType: "PCBeta JavaScript/安全验证" },
+        }),
+        steps,
+      };
+    }
     if (!loggedIn(taskPage.text, taskPage.title)) {
       return { success: false, message: "PCBeta 登录态无效或 Cookie 不完整，请重新维护 Cookie", details: taskDetails({ signTime, pageTitle: taskPage.title, stats: taskStats, taskUrl: dailyTaskUrl }), steps };
     }

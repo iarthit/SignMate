@@ -21,7 +21,7 @@ SignMate 仅作为开源的自托管自动化工具，供学习、研究及合�
 ```text
 ghcr.io/hughryu/signmate:latest   # 最新稳定版（随 v* 正式版本标签更新）
 ghcr.io/hughryu/signmate:edge     # main 分支最新构建，包含尚未发版的新功能/修复
-ghcr.io/hughryu/signmate:v0.1.25  # 固定正式版本
+ghcr.io/hughryu/signmate:v0.1.26  # 固定正式版本
 ```
 
 创建目录与配置文件：
@@ -75,6 +75,16 @@ docker compose pull
 docker compose up -d
 docker compose logs -f
 ```
+
+#### Linux 宿主机代理
+
+若 SignMate 必须访问同一台 Linux 宿主机上、仅绑定在宿主机网卡的代理端口，可启用仓库提供的 host-network 覆盖文件：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.host-network.yml up -d --build
+```
+
+该模式会让 SignMate 直接使用宿主机网络，并让 Web 面板继续监听 `9999`。仅应在可信的 Linux 自托管环境启用；不要同时保留其他服务占用 `9999`。
 
 首次启动如果还没有 `config/sites.yaml`，面板会以空站点列表正常打开；后续在网页里手动添加站点、维护 Cookie、代理和通知配置即可。默认 `RUN_ON_START=false`，避免全新部署尚未维护 Cookie 时自动执行签到。请保存上面输出的初始管理员密码，不要使用示例固定密码公开部署。
 
