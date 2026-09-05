@@ -148,12 +148,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("click", event => {
     const dismissBtn = event.target.closest("#btnDismissBatchProgress");
     if (dismissBtn) {
-      if (batchRunState?.id) {
-        dismissedInterruptedBatchIds.add(batchRunState.id);
-        localStorage.setItem("dismissedInterruptedBatchIds", JSON.stringify([...dismissedInterruptedBatchIds]));
-      }
-      batchRunState = { active: false };
-      renderBatchProgress(latestAllSites);
+      dismissBatchProgress();
       return;
     }
     if (event.target.closest("#btnCancelBatchProgress")) {
@@ -485,7 +480,7 @@ function applyBranding(branding = {}) {
   if (titleEl) titleEl.textContent = title;
   document.title = `${title} · 自动签到中心`;
   const logoEl = document.querySelector(".nav-logo");
-  if (logoEl && !logoEl.querySelector("img")) logoEl.innerHTML = '<img src="/logo.jpg?v=20260609-logo" alt="SignMate Logo">';
+  if (logoEl && !logoEl.querySelector("img")) logoEl.innerHTML = '<img src="/logo.jpg?v=20260702-logo-jpg" alt="SignMate Logo">';
 }
 
 async function api(url, options = {}) {
@@ -708,10 +703,27 @@ function formatDetailValue(value) {
   return String(value);
 }
 
+function formatDetailHtml(value) {
+  const text = formatDetailValue(value);
+  const linkOnly = String(text).match(/^\[([^\]]{1,80})\]\((https?:\/\/[^\s)]+)\)$/);
+  if (linkOnly) return `<a href="${escAttr(linkOnly[2])}" target="_blank" rel="noopener noreferrer">${esc(linkOnly[1])}</a>`;
+  const raw = String(text);
+  const re = /\[([^\]]{1,80})\]\((https?:\/\/[^\s)]+)\)/g;
+  let html = "";
+  let last = 0;
+  let match;
+  while ((match = re.exec(raw))) {
+    html += esc(raw.slice(last, match.index));
+    html += `<a href="${escAttr(match[2])}" target="_blank" rel="noopener noreferrer">${esc(match[1])}</a>`;
+    last = match.index + match[0].length;
+  }
+  return html ? html + esc(raw.slice(last)) : esc(raw);
+}
+
 function detailLabel(key = "") {
   const labels = {
-    signTime: "签到时间", pageTitle: "页面标题", alreadySigned: "已签到", reward: "奖励", rewardPoints: "奖励积分",
-    streakDays: "连续签到", totalDays: "累计签到/访问", totalPoints: "总积分", rewardCopper: "奖励铜币",
+    signTime: "签到时间", pageTitle: "页面标题", alreadySigned: "已签到", reward: "奖励", rewardPoints: "奖励积分", rewardPbCoins: "奖励 PB币",
+    streakDays: "连续签到", totalDays: "累计签到/访问", totalPoints: "总积分", totalPbCoins: "PB币", dailyTask: "每日打卡", replyTask: "回帖打卡", rewardCopper: "奖励铜币",
     totalGold: "金币", totalSilver: "银币", totalCopper: "铜币", rewardChickenLegs: "奖励鸡腿", totalChickenLegs: "总鸡腿",
     nodeSeekLevel: "NodeSeek 等级", nodeSeekLevelProgress: "等级进度", attendanceRank: "签到排名", attendanceTotalParticipants: "参与人数",
     username: "用户名", totalEnergy: "总能量", rewardEnergy: "今日能量", postCount: "帖子", likesReceived: "获赞", trustLevel: "信任等级",
@@ -740,7 +752,7 @@ function formatDetailsPanel(details = {}) {
     const lineCount = detailVisualLineCount(value);
     const isLongText = lineCount > 3 || String(value).length > 420;
     const extraClass = index >= 12 ? "extra-detail-row" : "";
-    return `<div class="process-detail-row ${extraClass} ${isLongText ? "long-text-row" : ""}" data-lines="${lineCount}"><span>${esc(detailLabel(key))}</span><code class="${isLongText ? "collapsible-detail" : ""}" title="${isLongText ? "双击展开/收起全部内容" : ""}">${esc(formatDetailValue(value))}</code></div>`;
+    return `<div class="process-detail-row ${extraClass} ${isLongText ? "long-text-row" : ""}" data-lines="${lineCount}"><span>${esc(detailLabel(key))}</span><code class="${isLongText ? "collapsible-detail" : ""}" title="${isLongText ? "双击展开/收起全部内容" : ""}">${formatDetailHtml(value)}</code></div>`;
   }).join("");
   return `<div class="process-details-panel ${folded ? "is-folded" : ""}"><div class="process-details-title-row"><h4>详细信息</h4>${folded ? `<button class="detail-expand-btn" type="button" data-action="toggle-details">展开全部 ${entries.length} 项</button>` : ""}</div><div class="process-detail-grid">${rows}</div></div>`;
 }
@@ -939,8 +951,10 @@ function buildAggregateMetrics(details = {}, siteKey = "") {
   const rewardCopper = finiteNumber(details.rewardCopper);
   const totalCoins = finiteNumber(details.totalWuAiCoins);
   const totalPoints = finiteNumber(details.totalPoints);
+  const totalPbCoins = finiteNumber(details.totalPbCoins);
+  const rewardPbCoins = finiteNumber(details.rewardPbCoins);
   const totalEnergy = finiteNumber(details.totalEnergy) ?? (siteKey === "nodeloc" ? totalPoints : null);
-  const explicitPointSites = new Set(["right", "pojie52", "pceva"]);
+  const explicitPointSites = new Set(["right", "pojie52", "pceva", "pcbeta"]);
   const totalDays = finiteNumber(details.totalDays);
   const streakDays = finiteNumber(details.streakDays);
   const totalGold = finiteNumber(details.totalGold);
@@ -1007,6 +1021,18 @@ function buildAggregateMetrics(details = {}, siteKey = "") {
     }
     if (shieldedCount !== null && shieldedCount > 0) items.push(metricItem(`🛡️屏蔽 ${esc(String(shieldedCount))}`, "metric-chip metric-level", "被屏蔽贴吧数量"));
     if (failedCount !== null && failedCount > 0) items.push(metricItem(`⚠️失败 ${esc(String(failedCount))}`, "metric-chip metric-error", "签到失败贴吧数量"));
+    return items.join("");
+  }
+
+  if (siteKey === "pcbeta") {
+    const parts = [];
+    if (totalPoints !== null || rewardPoints !== null) {
+      parts.push(`💎积分 ${esc(String(totalPoints !== null ? totalPoints : "?"))}${esc(signedDelta(rewardPoints))}`);
+    }
+    if (totalPbCoins !== null || rewardPbCoins !== null) {
+      parts.push(`🪙PB币 ${esc(String(totalPbCoins !== null ? totalPbCoins : "?"))}${esc(signedDelta(rewardPbCoins))}`);
+    }
+    if (parts.length) items.push(metricItem(parts.join(" / "), "metric-chip metric-points metric-coin", "PCBeta 积分 / PB币（括号内为本次获得）"));
     return items.join("");
   }
 
@@ -3511,6 +3537,7 @@ function renderBatchProgress(sites = latestAllSites) {
   const today = todaySuccessfulSigninCount(sites);
   const percent = batchProgressPercent();
   const interrupted = batchRunState.interrupted === true;
+  const notifyFailed = batchRunState.notifyFailed === true;
   const current = batchRunState.active
     ? `${batchRunState.currentName ? `正在签到：${batchRunState.currentName}` : "准备批量签到"}${batchRunState.currentStep ? ` · ${batchRunState.currentStep}` : ""}`
     : (batchRunState.summary || `批量签到完成：${ok}/${total} 成功`);
@@ -3518,10 +3545,10 @@ function renderBatchProgress(sites = latestAllSites) {
   const noticeType = batchRunState.noticeType || (batchRunState.active ? "info" : (failed ? "error" : "success"));
   const longNoticeClass = notice.length > 28 || /中断|未完成|服务重启/.test(notice) ? "is-plain" : "";
   const stopping = batchRunState.stopping === true;
-  const titleText = interrupted ? "上次批量任务已中断" : (batchRunState.cancelled ? "批量任务已终止" : (stopping ? "正在终止批量任务" : "全部签到进度"));
+  const titleText = interrupted ? "上次批量任务已中断" : (notifyFailed ? "批量通知发送失败" : (batchRunState.cancelled ? "批量任务已终止" : (stopping ? "正在终止批量任务" : "全部签到进度")));
   const actionHtml = interrupted
     ? `<button class="btn btn-primary btn-compact batch-progress-action" id="btnResumeBatchProgress" type="button">继续剩余站点</button><button class="btn btn-secondary btn-compact batch-progress-action" id="btnDismissBatchProgress" type="button">知道了</button>`
-    : (batchRunState.active && !stopping ? `<button class="btn btn-danger btn-compact batch-progress-action" id="btnCancelBatchProgress" type="button">终止签到</button>` : (batchRunState.cancelled ? `<button class="btn btn-secondary btn-compact batch-progress-action" id="btnDismissBatchProgress" type="button">知道了</button>` : ""));
+    : (batchRunState.active && !stopping ? `<button class="btn btn-danger btn-compact batch-progress-action" id="btnCancelBatchProgress" type="button">终止签到</button>` : ((batchRunState.cancelled || notifyFailed) ? `<button class="btn btn-secondary btn-compact batch-progress-action" id="btnDismissBatchProgress" type="button">知道了</button>` : ""));
   el.classList.remove("hidden");
   el.innerHTML = `
     <div class="batch-progress-head">
@@ -3555,7 +3582,7 @@ function setBatchNotice(message = "", type = "info") {
 function applyBackendBatchState(state = {}) {
   if (!state) return false;
   const results = Array.isArray(state.results) ? state.results : [];
-  const hasInterruptedState = !state.completedAt && !!state.interruptedNotifiedAt && Number(state.total || 0) > 0;
+  const hasInterruptedState = !state.completedAt && (!!state.interruptedNotifiedAt || !!state.interruptedAt || !!state.fatalError) && Number(state.total || 0) > 0;
   const cancelled = !state.active && (!!state.cancelRequestedAt || !!state.cancelledAt);
   const notifyFailed = !!state.notifyFailedAt || !!state.notifyError;
   if ((hasInterruptedState || cancelled || notifyFailed) && state.id && dismissedInterruptedBatchIds.has(state.id)) {
@@ -3615,7 +3642,7 @@ function applyBackendBatchState(state = {}) {
 async function refreshBackendBatchState(silent = false) {
   try {
     const { data } = await api("/api/batch-state");
-    if (data?.active || data?.cancelRequestedAt || data?.cancelledAt || data?.notifyFailedAt || data?.notifyError || (!data?.completedAt && data?.interruptedNotifiedAt && Number(data?.total || 0) > 0)) {
+    if (data?.active || data?.cancelRequestedAt || data?.cancelledAt || data?.notifyFailedAt || data?.notifyError || (!data?.completedAt && (data?.interruptedNotifiedAt || data?.interruptedAt || data?.fatalError) && Number(data?.total || 0) > 0)) {
       applyBackendBatchState(data);
       return true;
     }
@@ -3632,6 +3659,23 @@ async function refreshBackendBatchState(silent = false) {
     if (!silent) console.debug?.("batch-state refresh failed", err);
   }
   return false;
+}
+
+async function dismissBatchProgress() {
+  const stateId = batchRunState?.id || "";
+  const shouldClearBackend = batchRunState?.notifyFailed || batchRunState?.cancelled;
+  if (stateId) {
+    dismissedInterruptedBatchIds.add(stateId);
+    localStorage.setItem("dismissedInterruptedBatchIds", JSON.stringify([...dismissedInterruptedBatchIds]));
+  }
+  batchRunState = { active: false };
+  renderBatchProgress(latestAllSites);
+  if (!shouldClearBackend) return;
+  try {
+    await api(`/api/batch-state${stateId ? `?id=${encodeURIComponent(stateId)}` : ""}`, { method: "DELETE" });
+  } catch (err) {
+    console.debug?.("batch-state dismiss failed", err);
+  }
 }
 
 async function waitForBatchCompletion(maxWaitMs = 30 * 60 * 1000) {

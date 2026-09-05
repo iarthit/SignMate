@@ -8,8 +8,8 @@
 
 import BaseDriver from "./base.js";
 import logger from "../utils/logger.js";
-import { ProxyAgent } from "undici";
-import { resolveChromiumExecutablePath } from "../utils/browser.js";
+import { ProxyAgent, fetch as undiciFetch } from "undici";
+import { resolveChromiumExecutablePath, launchBrowser } from "../utils/browser.js";
 import { wantsHttpMode, allowsHttpFallback, runSiteHttp } from "../utils/site-http.js";
 
 function normalizeCookieHeader(value = "") {
@@ -58,7 +58,7 @@ async function fetchJson(url, cookie, proxyUrl, timeout = 30_000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const res = await fetch(url, {
+    const res = await undiciFetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
@@ -81,9 +81,22 @@ function findDirectoryItem(directory = {}, userId, username) {
   return items.find(item => item.id === userId || item.user?.id === userId || item.user?.username === username) || null;
 }
 
+function domainFromBaseUrl(baseUrl = "", fallback = ".nodeloc.com") {
+  try {
+    const host = new URL(baseUrl).hostname;
+    if (!host) return fallback;
+    // registrable-ish domain: strip a leading "www." so cookie applies to whole site
+    const bare = host.replace(/^www\./i, "");
+    return "." + bare;
+  } catch {
+    return fallback;
+  }
+}
+
 export default class NodeLocDriver extends BaseDriver {
   getCookie() {
-    const secrets = this.secrets?.nodeloc || {};
+    const key = this.siteConfig.key || "nodeloc";
+    const secrets = this.secrets?.[key] || this.secrets?.nodeloc || {};
     const cookie = normalizeCookieHeader(secrets.cookie || "");
     if (!cookie || cookie.includes("<YOUR_")) return "";
     if (/[^\x00-\xff]/.test(cookie)) throw new Error("Cookie 含非法字符，请重新从浏览器复制原始 Cookie");
@@ -111,13 +124,17 @@ export default class NodeLocDriver extends BaseDriver {
     const signTime = formatSignTime();
     const proxy = proxy_url ? { server: proxy_url } : undefined;
 
-    logger.info(`[NodeLoc] 步骤 1/5：启动 Playwright 浏览器${proxy_url ? `，代理: ${proxy_url}` : ""}`);
-    const browser = await chromium.launch({
-      executablePath: chromium_executable_path,
-      headless: true,
-      proxy,
-      args: ["--disable-blink-features=AutomationControlled", "--no-sandbox"],
-      timeout,
+    logger.info(`[NodeLoc] 步骤 1/5：启动 Playwright/CloakBrowser 浏览器${proxy_url ? `，代理: ${proxy_url}` : ""}`);
+    const browser = await launchBrowser({
+      chromium,
+      siteConfig: this.siteConfig,
+      launchOptions: {
+        executablePath: chromium_executable_path,
+        headless: true,
+        proxy,
+        args: ["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+        timeout,
+      },
     });
 
     try {
@@ -137,12 +154,38 @@ export default class NodeLocDriver extends BaseDriver {
       logger.info(`[NodeLoc] 步骤 3/5：打开首页 → ${origin}/`);
       const home = await page.goto(`${origin}/`, { waitUntil: "domcontentloaded", timeout });
       await page.waitForTimeout(this.siteConfig.playwright_wait_ms || 2000);
+
+      // Cloudflare 'Just a moment...' JS challenge: give the browser time to solve it.
+      // Static cf_clearance cookies bind to the original IP/UA; when the proxy IP differs,
+      // CF re-challenges. Poll until the interstitial title is gone (or budget exhausted).
+      const cfBudgetMs = Number(this.siteConfig.cf_challenge_wait_ms || 25000);
+      const cfDeadline = Date.now() + cfBudgetMs;
+      let cfTitle = await page.title().catch(() => "");
+      const looksLikeChallenge = t => /just a moment|attention required|请稍候|checking your browser|cf-browser-verification/i.test(String(t || ""));
+      let cfLoops = 0;
+      while (looksLikeChallenge(cfTitle) && Date.now() < cfDeadline) {
+        cfLoops++;
+        logger.info(`[NodeLoc] 检测到 Cloudflare 质询页「${cfTitle}」，等待自动通过 (${cfLoops})…`);
+        await page.waitForTimeout(3000);
+        await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+        cfTitle = await page.title().catch(() => "");
+      }
+
       const title = await page.title().catch(() => "");
       const bodyText = await page.locator("body").innerText({ timeout: 5000 }).catch(() => "");
       logger.info(`[NodeLoc] 步骤 4/5：页面状态 ${home?.status() || "unknown"} | ${title} | ${bodyText.replace(/\s+/g, " ").slice(0, 260)}`);
 
+      // Re-sync cookies from the browser context back into the raw Cookie header, so any
+      // fresh cf_clearance obtained by solving the challenge is used by the direct fetch calls.
+      let effectiveCookie = cookie;
+      try {
+        const ctxCookies = await context.cookies(origin);
+        const merged = ctxCookies.filter(c => c && c.name).map(c => `${c.name}=${c.value}`).join("; ");
+        if (merged) effectiveCookie = merged;
+      } catch {}
+
       logger.info("[NodeLoc] 步骤 5/5：读取当前用户与活跃数据");
-      let currentRes = await fetchJson(`${origin}/session/current.json`, cookie, proxy_url, timeout);
+      let currentRes = await fetchJson(`${origin}/session/current.json`, effectiveCookie, proxy_url, timeout);
       let current = currentRes.json?.current_user;
       let username = pickUserName(current);
       if (!current?.id || !username) {

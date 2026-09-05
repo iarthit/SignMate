@@ -8,8 +8,8 @@
 
 import BaseDriver from "./base.js";
 import logger from "../utils/logger.js";
-import { resolveChromiumExecutablePath } from "../utils/browser.js";
-import { wantsHttpMode, allowsHttpFallback, runDiscuzHttp } from "../utils/discuz-http.js";
+import { resolveChromiumExecutablePath, buildPlaywrightLaunchOptions } from "../utils/browser.js";
+import { wantsHttpMode, allowsHttpFallback, isHumanVerificationPage, runDiscuzHttp } from "../utils/discuz-http.js";
 
 function normalizeCookieHeader(value = "") {
   return String(value || "")
@@ -161,13 +161,13 @@ export default class RightDriver extends BaseDriver {
     const signTime = formatSignTime();
 
     logger.info(`[恩山无线论坛] 步骤 1/5：启动 Playwright 浏览器${proxy_url ? `，代理: ${proxy_url}` : ""}`);
-    const browser = await chromium.launch({
+    const browser = await chromium.launch(buildPlaywrightLaunchOptions({
       executablePath: chromium_executable_path,
       headless: true,
       proxy,
       args: ["--disable-blink-features=AutomationControlled", "--no-sandbox"],
       timeout,
-    });
+    }));
 
     try {
       const context = await browser.newContext({
@@ -191,6 +191,19 @@ export default class RightDriver extends BaseDriver {
       const bodyText = await page.locator("body").innerText({ timeout: 5000 }).catch(() => "");
       const preview = bodyText.replace(/\s+/g, " ").slice(0, 260);
       logger.info(`[恩山无线论坛] 步骤 4/5：页面状态 ${signPage?.status() || "unknown"} | ${title} | ${preview}`);
+
+      if (isHumanVerificationPage(bodyText, title)) {
+        return {
+          success: false,
+          message: "恩山无线论坛触发了阿里云 ESA 滑块验证，请在浏览器中完成验证后再重试；Cookie 暂未判定为失效",
+          details: { signTime, pageTitle: title, checkinAction: "human_verification", verificationType: "aliyun_esa_slider" },
+          steps: [
+            { label: "启动 Playwright 浏览器", ok: true },
+            { label: "注入 Cookie 并准备浏览器上下文", ok: true },
+            { label: "打开恩山签到页面", ok: false, status: signPage?.status() || null, detail: "检测到阿里云 ESA 滑块验证" },
+          ],
+        };
+      }
 
       if (!isLoggedIn(bodyText)) {
         return {

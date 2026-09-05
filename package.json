@@ -1,33 +1,37 @@
 {
   "name": "signmate",
-  "version": "0.1.19",
+  "version": "0.1.26",
   "private": true,
   "description": "SignMate 签伴 - 多站点签到与保活管理",
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
     "start:dev": "node --watch src/index.js",
-    "check": "node --check src/server.js && node --check src/runner.js && node --check src/scheduler.js && node --check src/index.js && node --check src/web/app.js",
+    "check": "node --check src/server.js && node --check src/runner.js && node --check src/scheduler.js && node --check src/index.js && node --check src/web/app.js && node --check src/utils/site-http.js && node --check src/drivers/v2ex-utils.js && node --check src/drivers/v2ex.js && node --check src/drivers/pcbeta.js",
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",
-    "test": "npm run check && npm run test:feng && npm run check:browser && npm run audit:prod",
+    "test": "npm run check && npm run test:v2ex && npm run test:pcbeta && npm run test:feng && npm run test:naixi && npm run check:browser && npm run audit:prod",
+    "test:v2ex": "node --test test/v2ex.test.js",
+    "test:pcbeta": "node --test test/pcbeta.test.js",
     "test:nodeseek": "node src/drivers/nodeseek.js",
     "check:browser": "node scripts/check-browser.js",
     "release:check": "node scripts/release-check.js",
     "smoke:sites": "node scripts/smoke-sites.js",
-    "test:feng": "node scripts/test-feng-credentials.js"
+    "test:feng": "node scripts/test-feng-credentials.js",
+    "test:naixi": "node scripts/test-naixi-sign.js"
   },
   "dependencies": {
     "chalk": "^5.4.1",
+    "cloakbrowser": "^0.3.31",
     "crypto-js": "^4.2.0",
-    "express": "^4.21.0",
+    "express": "^4.22.2",
     "iconv-lite": "^0.6.3",
     "node-cron": "^4.2.1",
     "playwright-core": "1.57.0",
-    "sharp": "^0.33.0",
+    "sharp": "^0.35.3",
+    "tar": "^7.5.22",
     "tesseract.js": "^6.0.0",
-    "undici": "^7.16.0",
-    "yaml": "^2.7.0",
-    "cloakbrowser": "^0.3.31"
+    "undici": "8.10.0",
+    "yaml": "^2.7.0"
   },
   "displayName": "SignMate",
   "productName": "SignMate 签伴"

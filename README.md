@@ -6,6 +6,12 @@
 
 基于 Node.js 的 Docker 化多论坛自动签到系统，插件式 Driver 架构，支持不同签到方式的论坛扩展。
 
+## 免责声明
+
+SignMate 仅作为开源的自托管自动化工具，供学习、研究及合法的个人使用。使用者在部署和运行前，必须自行确认目标站点的服务条款、自动化政策及适用法律法规，并确保对所使用的账号、Cookie、Token、2FA Secret、代理和通知配置拥有合法授权。严禁将本项目用于未授权访问、绕过验证码或风控、规避站点限制、批量骚扰请求、账号共享或其他违反站点规则及法律法规的行为；遇到验证码、人机验证或访问限制时，应按站点要求人工处理，不得尝试绕过。
+
+项目不保证第三方站点始终可访问、登录态持续有效、签到必然成功或任何特定功能持续可用。因使用本项目导致的账号限制、封禁、数据丢失、凭据泄露、服务中断或其他直接、间接损失，由部署者和使用者自行承担；项目维护者不对目标站点的行为、内容、政策变更或服务可用性负责。请勿将包含真实凭据、Cookie、Token 或日志的配置文件提交到公开仓库，并在不确定目标站点是否允许自动化时停止使用并向站点运营方确认。
+
 ## 快速开始
 
 ### 方式 A：直接使用 GHCR Docker 镜像（推荐）
@@ -15,7 +21,7 @@
 ```text
 ghcr.io/hughryu/signmate:latest   # 最新稳定版（随 v* 正式版本标签更新）
 ghcr.io/hughryu/signmate:edge     # main 分支最新构建，包含尚未发版的新功能/修复
-ghcr.io/hughryu/signmate:v0.1.19  # 固定正式版本
+ghcr.io/hughryu/signmate:v0.1.26  # 固定正式版本
 ```
 
 创建目录与配置文件：
@@ -69,6 +75,16 @@ docker compose pull
 docker compose up -d
 docker compose logs -f
 ```
+
+#### Linux 宿主机代理
+
+若 SignMate 必须访问同一台 Linux 宿主机上、仅绑定在宿主机网卡的代理端口，可启用仓库提供的 host-network 覆盖文件：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.host-network.yml up -d --build
+```
+
+该模式会让 SignMate 直接使用宿主机网络，并让 Web 面板继续监听 `9999`。仅应在可信的 Linux 自托管环境启用；不要同时保留其他服务占用 `9999`。
 
 首次启动如果还没有 `config/sites.yaml`，面板会以空站点列表正常打开；后续在网页里手动添加站点、维护 Cookie、代理和通知配置即可。默认 `RUN_ON_START=false`，避免全新部署尚未维护 Cookie 时自动执行签到。请保存上面输出的初始管理员密码，不要使用示例固定密码公开部署。
 
@@ -136,6 +152,7 @@ SignMate 内置以下站点 Driver / 站点模板。站点凭据请在 Web 面�
 | 恩山无线论坛 | `right` | `right` | 签到 | API-first（浏览器兜底） |
 | 卡饭论坛 | `kafan` | `kafan` | 签到 | API-first（浏览器兜底） |
 | 阡陌居 | `qianmoju` | `qianmoju` | 签到 | API-first（浏览器兜底） |
+| PCBeta | `pcbeta` | `pcbeta` | 签到 | API |
 | 百度贴吧 | `baidu-tieba` | `tieba` | 签到 | API |
 
 ### PT / NexusPHP

@@ -4,6 +4,105 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本的 patch 递增节奏。
 
+## [0.1.26] - 2026-09-04
+
+### 修复
+
+- PCBeta 识别“请启用 JavaScript 后重试”等 JavaScript/安全验证页，不再误报为 Cookie 无效。
+- PCBeta 遇到该验证页时停止后续任务并明确要求在相同代理出口人工验证，不执行签到、回帖或领奖。
+
+### 部署
+
+- 新增 Linux `docker-compose.host-network.yml` 覆盖文件，供必须访问同机宿主机代理的可信自托管环境使用；默认 bridge 网络部署保持不变。
+
+## [0.1.25] - 2026-08-17
+
+### 修复
+
+- 增强 V2EX 每日奖励入口发现：支持从链接、表单、事件属性、数据属性和原始 HTML 中提取候选入口；只接受 V2EX 同站且带 `once` 参数的领取 URL，避免误点推广内容。
+- V2EX 找不到领取入口时会刷新页面重试，并通过“已领取”状态或当天奖励记录确认结果，避免将页面临时状态或已领取状态误报为 Cookie 失效。
+- 恩山无线论坛检测到阿里云 ESA 滑块验证时，明确标记为需要人工验证，不再误判为 Cookie 失效。
+
+### 测试与文档
+
+- 增加 V2EX 领取链接校验、广告过滤、事件属性提取和奖励状态确认测试。
+- 语法检查覆盖 V2EX driver、V2EX 工具和 HTTP 签到路径。
+- README 增加自托管使用边界与凭据保护免责声明。
+
+## [0.1.24] - 2026-07-27
+
+### 修复
+
+- 修复 Playwright Chromium 在 Docker 生产环境中因 crashpad dump 目录缺失导致启动阶段 `SIGTRAP` 崩溃的问题。
+- 修复容器以 `pwuser` 运行应用时仍继承 `HOME=/root`，导致浏览器缓存目录不可写的问题。
+- 移除 Linux.do 内置站点配置，避免已废弃站点继续参与自动保活。
+- 升级 `express`、`sharp`、`tar` 相关依赖，修复发布审计中的 high/moderate 级漏洞告警。
+
+### 优化
+
+- 统一 Playwright 直接启动路径的默认浏览器参数，确保各站点 driver 使用一致的 Chromium 启动配置。
+- 容器入口会初始化 `HOME`、`XDG_CACHE_HOME`、`XDG_CONFIG_HOME` 与 Chromium crash dump 目录，提升浏览器运行稳定性。
+
+## [0.1.23] - 2026-07-09
+
+### 修复
+
+- 修复 Node.js 24 内置 fetch 与项目依赖 `undici` 的 `ProxyAgent` 混用导致代理请求报 `UND_ERR_INVALID_ARG` 的问题。
+- 修复 Telegram/Bark 通知在代理模式下可能因 fetch/dispatcher 版本不兼容发送失败的问题。
+- 修复批量任务已完成但通知发送失败后，主页进度卡缺少“知道了”清理入口而长期残留的问题。
+
+### 优化
+
+- 代理 HTTP 请求统一使用同一 `undici` 实例的 `fetch` 与 `ProxyAgent`，避免 Node 运行时内置 Undici 版本变化引发兼容问题。
+- 新增安全的批量完成态清理接口，仅允许清理已完成、已终止或通知失败的非运行中状态。
+
+## [0.1.22] - 2026-07-08
+
+### 修复
+
+- 修复代理链接更新后仍沿用旧健康检查失败缓存，导致手动签到继续报“没有健康可用的代理”的问题。
+- 修复全部签到/保活批量任务在外层异常或通知失败状态下可能残留主页进度的问题。
+
+### 优化
+
+- 代理可用性判断现在会确认健康缓存是否对应当前代理地址，避免旧代理失败状态误伤新配置。
+- 批量任务状态收尾增加外层保护，确保异常时释放 active 状态并向前端展示明确中断信息。
+
+## [0.1.21] - 2026-07-06
+
+### 新增
+
+- 自动批量执行失败后会立即按失败站点列表补跑一次，避免重新执行已经成功的站点。
+- 新增每天 23:00 失败站点补跑，只补跑当天失败且当天没有后续成功记录的自动站点。
+
+### 优化
+
+- 全部签到/保活执行前会读取当天历史，自动跳过当天已经成功的同类站点。
+- 失败补跑和当天成功跳过支持按 `key`、`driver`、`note`、`name`、`siteKey`、`site` 多种名称匹配历史记录。
+- V2EX 成功识别增加 `has been redeemed`、`reward redeemed`、`每日登录奖励已发放` 等状态，并支持通过铜币余额变化确认领取成功。
+
+### 修复
+
+- 收紧 PCBeta 领奖成功判定，需由领奖响应或已完成任务页确认，避免泛匹配“奖励/完成”造成误报。
+- 修复 driver 未注册和站点离线这类早退失败缺少 `siteKey`，导致失败补跑无法定位站点的问题。
+- 修正批量状态进度统计，把当天已成功跳过的站点纳入 `done` 和 `completedKeys`。
+
+## [0.1.20] - 2026-07-02
+
+### 新增
+
+- 新增 PCBeta 签到驱动，支持远景论坛每日任务申请、回帖打卡、奖励领取与已完成状态识别。
+- PCBeta 支持读取累计积分、累计 PB币、本次每日打卡 PB币和回帖打卡 PB币，并在面板累计栏与详情中展示。
+
+### 优化
+
+- PCBeta 内置站点显示名简化为 `PCBeta`。
+- PCBeta 执行摘要按每日打卡与回帖打卡分别展示获得的 PB币。
+
+### 修复
+
+- 修复登录页未登录状态下 Logo 静态资源被鉴权重定向导致无法正确显示的问题。
+
 ## [0.1.19] - 2026-06-09
 
 ### 修复
@@ -154,6 +253,10 @@
 
 - 动态解析 Chromium 可执行路径，提升不同环境下的浏览器兼容性。
 
+[0.1.23]: https://github.com/HughRyu/SignMate/compare/v0.1.22...v0.1.23
+[0.1.22]: https://github.com/HughRyu/SignMate/compare/v0.1.21...v0.1.22
+[0.1.21]: https://github.com/HughRyu/SignMate/compare/v0.1.20...v0.1.21
+[0.1.20]: https://github.com/HughRyu/SignMate/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/HughRyu/SignMate/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/HughRyu/SignMate/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/HughRyu/SignMate/compare/v0.1.16...v0.1.17
@@ -168,3 +271,5 @@
 [0.1.7]: https://github.com/HughRyu/SignMate/releases/tag/v0.1.7
 [0.1.6]: https://github.com/HughRyu/SignMate/releases/tag/v0.1.6
 [0.1.5]: https://github.com/HughRyu/SignMate/releases/tag/v0.1.5
+[0.1.24]: https://github.com/HughRyu/SignMate/compare/v0.1.23...v0.1.24
+[0.1.26]: https://github.com/HughRyu/SignMate/compare/v0.1.25...v0.1.26

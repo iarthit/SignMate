@@ -7,6 +7,7 @@
 
 import logger from "./logger.js";
 import { createHttpSession, getCookieForSite, htmlToText, pageTitleFromHtml, readText } from "./http-session.js";
+import { isNaixiAlreadySigned } from "./naixi-sign.js";
 
 export function wantsHttpMode(siteConfig = {}) {
   const explicit = siteConfig.experimental_signin_mode
@@ -38,6 +39,11 @@ function formatSignTime(date = new Date()) {
 
 function compactText(text = "") {
   return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+export function isHumanVerificationPage(text = "", title = "") {
+  const source = `${title}\n${text}`;
+  return /滑动验证|请按住滑块|验证您是真人|阿里云ESA|性能和安全由阿里云ESA|人机验证|Request ID[:：]/i.test(source);
 }
 
 function decodeHtml(value = "") {
@@ -281,7 +287,7 @@ async function runNaixi(siteConfig, secrets) {
   const page = await openText(session, `${origin}/k_misign-sign.html`, steps, "HTTP 打开奶昔签到页面");
   if (!loggedIn(page.text, page.title)) return { success: false, message: "奶昔论坛登录态无效或 Cookie 不完整，请重新维护 Cookie", details: { signTime, pageTitle: page.title }, steps };
   let stats = parseNaixiStats(page.text, page.html);
-  if (alreadySigned(page.text)) {
+  if (isNaixiAlreadySigned(page.text)) {
     steps.push({ label: "HTTP 读取签到状态", ok: true, detail: "页面显示今天已签到" });
     return { success: true, message: `今天已完成签到${stats.reward ? `，奖励 ${stats.reward}` : ""}${Number.isFinite(stats.streakDays) ? `；连续签到 ${stats.streakDays} 天` : ""}；签到时间：${signTime}`, details: { signTime, alreadySigned: true, clickedSignIn: false, checkinAction: "api_already_signed", ...stats, pageTitle: page.title }, steps };
   }
@@ -335,6 +341,15 @@ async function runRight(siteConfig, secrets) {
   const signPageUrl = `${base}/erling_qd-sign_in.html`;
   logger.info(`[恩山/API] HTTP 打开签到页 → ${signPageUrl}`);
   const page = await openText(session, signPageUrl, steps, "HTTP 打开恩山签到页面");
+  if (isHumanVerificationPage(page.text, page.title)) {
+    steps.push({ label: "检测恩山人机验证", ok: false, status: page.res.status, detail: "阿里云 ESA 滑块验证" });
+    return {
+      success: false,
+      message: "恩山无线论坛触发了阿里云 ESA 滑块验证，请在浏览器中完成验证后再重试；Cookie 暂未判定为失效",
+      details: { signTime, pageTitle: page.title, checkinAction: "human_verification", verificationType: "aliyun_esa_slider" },
+      steps,
+    };
+  }
   if (!loggedIn(page.text, page.title)) return { success: false, message: "恩山无线论坛登录态无效或 Cookie 不完整，请重新维护 Cookie", details: { signTime, pageTitle: page.title }, steps };
   let stats = parseRightStats(page.text);
   if (alreadySigned(page.text) && !/signin-btn|签到中|立即签到/.test(page.text)) {
