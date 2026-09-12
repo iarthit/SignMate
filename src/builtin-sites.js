@@ -376,6 +376,21 @@ export const BUILTIN_SITES = {
     "proxy": "auto",
     "signin_mode": "api"
   },
+  "wintersakura": {
+    "enabled": true,
+    "driver": "wintersakura",
+    "schedule": "auto",
+    "note": "WinterSakura",
+    "notify": true,
+    "retry": 2,
+    "retry_delay_ms": 10000,
+    "timeout": 30000,
+    "base_url": "https://wintersakura.net",
+    "category": "pt",
+    "kind": "signin",
+    "proxy": "auto",
+    "signin_mode": "api"
+  },
   "pterclub-net": {
     "enabled": true,
     "driver": "nexusphp",
